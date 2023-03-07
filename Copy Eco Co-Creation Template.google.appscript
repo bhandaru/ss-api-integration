@@ -1,0 +1,218 @@
+//Set Variables for Smartsheet.
+//Replace the values as applicable to your environment
+var SMARTSHEET_TOKEN_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1wFz8MHoZUbbnnXQFf9_CfCj6X-W6bH6UERXU-44lgwI/edit?usp=share_link';
+var MAIN_PROJECTS_SHEETID = 266473710086020; //Required. This the sheet id of the main sheet to which new co-creation requests are submitted.
+var TEMPLATE_FOLDER_ID = 673240235435908; //Required. This is the folder id of Co-creation projects template folder.
+var DESTINATION_FOLDER_ID = 1022506975946628; //Required. This is the folder id of the destination solutions projects where the template folder should be copied to.
+var DESTINATION_DOCUMENT_NAME = "Project Dashboard";//Required. This is the name of the dashboard whose URL to be updated in the main projects task sheet.
+var LOOKUP_COLUMN_NAME = "Project ID";//Required. This is the column name of the auto-generated number column in the main proejects sheet. This is used to lookup the row id of the row that should be updated.
+var UPDATE_COLUMN_NAME = "Project Plan";//Required. This is the name of the column that should be updated with the URL to the DESTINATION_DOCUMENT_NAME
+var NEWPROJECT_TASK_SHEET_NAME= "Task Sheet";//Required. This is the name of the document that should be updated with the project name
+var NEWPROJECT_TASK_SHEET_DESC_COLUMN_NAME = "Description";//Required. This is the name of the column that should be updated on the first row.
+var NEWPROJECT_TASK_SHEET_ID = "";//Leave this value empty. This is determined at runtime.
+var PROCESSED_MESSAGE_LABEL = "Processed";//Leave this value empty. This is determined at runtime.
+
+function processNewCoCreationRequests() {
+
+  if(getSmartSheetToken_(SMARTSHEET_TOKEN_SHEET_URL) == ""){
+    Logger.log("SMARTSHEET_TOKEN is invalid");
+    return ;
+  };
+
+  var messages = GmailApp.search("subject:new-eco-co-creation-submitted label:inbox label:unread");
+  Logger.log("Found " + messages.length + " messages...");
+
+  for (var i = messages.length - 1; i >= 0; i--) {
+    try{
+        //Process them in the order received
+        var id = messages[i].getMessages();
+        var subject = id[0].getSubject()
+        Logger.log("Processing message: " + subject);
+        
+        var jsonPayload = id[0].getPlainBody().split("<json>")[1].split("</json>")[0];
+        var jsonObject = JSON.parse(jsonPayload);
+
+        var projectId = jsonObject["Project ID"];
+        var projectName = jsonObject["Project Name"];
+        var projectDashboardURL = "";
+        projectId= parseInt(projectId);
+        if (!isNaN(projectId))
+        {
+          Logger.log("Copying the Co-Creation template in Smartsheet... for Proeject ID: "+ projectId)
+          projectDashboardURL = copyCoCreationProjectTemplate_(projectName);
+          Logger.log("Project Dashboard URL: " + projectDashboardURL);
+        }
+        else
+        {
+          Logger.log("Project ID: " + projectId + " is invalid. Deleting the email message");
+        }
+
+        //Update Main sheet with project dashboard url
+        Logger.log("updating main sheet with dashboardURL on row with projectId: " + projectId)
+        updateMainSheetRow_(projectId,projectDashboardURL);
+
+        //Update Task Sheet with project name
+        Logger.log("Updating Task Sheet's Description column on 1st row with project Name: " + projectName)
+        updateTaskSheetRow_(NEWPROJECT_TASK_SHEET_ID, projectName);
+
+        //Move the message to "Processed" label and archive.
+        Logger.log('Marking the message as Read and moving to ' + PROCESSED_MESSAGE_LABEL);
+        id[0].markRead();
+        messages[i].addLabel(GmailApp.getUserLabelByName(PROCESSED_MESSAGE_LABEL)).moveToArchive();
+        Logger.log("Processed Project ID: " + projectId);
+      }
+    catch(err){
+      Logger.log("Error processing Project ID: " + projectId)
+    }
+  } 
+}
+
+function copyCoCreationProjectTemplate_(newFolderName){
+
+  var restMethod = "/folders/" + TEMPLATE_FOLDER_ID + "/copy?include=data";
+  var data = { 
+                "destinationType": "folder",
+                "destinationId": DESTINATION_FOLDER_ID,
+                "newName": newFolderName
+              };
+
+  try{
+    //Copy
+    var response = sendToSmartsheet_(restMethod,data,'POST');
+    Logger.log("New project folder ID: " + response.result.id);
+    Logger.log("New project folder name: " + response.result.name);
+    var newProjectFolderId = response.result.id;
+    var dashboardURL="";
+    response = sendToSmartsheet_("/folders/"+ newProjectFolderId, null, 'GET');
+    
+    //Get Dashboard  permalink URL
+    dashboardURL =  response.sights.find(s=>s.name === DESTINATION_DOCUMENT_NAME).permalink;
+    Logger.log("New project dashboard URL: " + dashboardURL);
+
+    //Get new project Task Sheet id
+    NEWPROJECT_TASK_SHEET_ID = response.sheets.find(s=>s.name === NEWPROJECT_TASK_SHEET_NAME).id;
+    Logger.log("New project Task Sheet ID: " + NEWPROJECT_TASK_SHEET_ID);
+  }
+  catch(err){
+    Logger.log(err)
+    throw new Error("Error copying template folder and getting dashboard URL")
+  }
+  return dashboardURL;
+}
+
+function updateMainSheetRow_(projectID,projectDashboardURL){
+
+  Logger.log("Updating main project # " + projectID);
+  try{
+    var response = sendToSmartsheet_("/sheets/"+ MAIN_PROJECTS_SHEETID + "?level=2&include=objectValue", null, 'GET');
+    var lookupColumnID = response.columns.find(t=>t.title.toUpperCase() === LOOKUP_COLUMN_NAME.toUpperCase()).id;
+    var updateColumnID = response.columns.find(t=>t.title.toUpperCase() === UPDATE_COLUMN_NAME.toUpperCase()).id;
+    //6654986651756420
+    Logger.log("Column ID for " + LOOKUP_COLUMN_NAME + ": " + lookupColumnID);
+    Logger.log("Column ID for " + UPDATE_COLUMN_NAME + ": " + updateColumnID);
+
+    var lookupRowID= response.rows.find(r=>r.cells.find(c=>c.columnId === lookupColumnID).objectValue === projectID).id;
+    Logger.log("Row ID for Project ID# " + projectID + ": "+ lookupRowID);
+
+    var updateData = [{
+                      "id": lookupRowID,
+                      "cells": [{
+                                  "columnId": updateColumnID,
+                                  'value'  : 'Project Dashboard',
+                                  'hyperlink' : { "url": projectDashboardURL},
+                                  'strict': false
+                                }]
+                      }];
+    response = sendToSmartsheet_("/sheets/"+ MAIN_PROJECTS_SHEETID + "/rows", updateData, 'PUT');
+  }
+  catch(err)
+  {
+    Logger.log("Error updating main project row for Project ID: " + projectID);
+    throw new Error(err);
+  }
+  return lookupRowID;
+}
+
+function updateTaskSheetRow_(taskSheetId, projectName){
+
+  try{
+
+    var response = sendToSmartsheet_("/sheets/"+ taskSheetId + "?level=2&include=objectValue", null, 'GET');
+    var lookupColumnID = response.columns.find(t=>t.title.toUpperCase() === "DESCRIPTION".toUpperCase()).id;
+    Logger.log("Column ID for Description: " + lookupColumnID);
+    var lookupRowID= response.rows[0].id;
+    var updateData = [{
+                      "id": lookupRowID,
+                      "cells": [{
+                                  "columnId": lookupColumnID,
+                                  'value'  : projectName,
+                                  'strict': false
+                                }]
+                      }];
+    response = sendToSmartsheet_("/sheets/"+ taskSheetId + "/rows", updateData, 'PUT');
+  }
+  catch(err){
+    Logger.log(err)
+  }
+  return;
+}
+
+function sendToSmartsheet_(restEndpoint, formData, httpMethod){
+  try{
+    var SMARTSHEET_ACCESS_TOKEN = getSmartSheetToken_(SMARTSHEET_TOKEN_SHEET_URL);
+
+    Logger.log("Calling Smartsheet API endpoint: "+ restEndpoint + " using http " + httpMethod + " method");
+    const restURL = "https://api.smartsheet.com/2.0" + restEndpoint;
+    const headers = { 
+        "Authorization" : "Bearer " + SMARTSHEET_ACCESS_TOKEN
+      };
+    
+    var options = { 
+      'method' : httpMethod,
+      'contentType': 'application/json',
+      'headers': headers
+    };
+
+    if (httpMethod.toUpperCase() == 'POST' || httpMethod.toUpperCase() == 'PUT')
+    {
+      options.payload=JSON.stringify(formData);
+    }
+
+    if (formData != null ) Logger.log("Request data: \n"+ JSON.stringify(formData));
+    const response = UrlFetchApp.fetch(restURL, options);
+    Logger.log("Response data: \n"+ response);
+    var data = JSON.parse(response);
+  }
+  catch(err)
+  {
+    Logger.log(err)
+  }
+  //Return
+  return data
+}
+
+function getSmartSheetToken_(sheetURL){
+  try{
+    var sheet = SpreadsheetApp.openByUrl(sheetURL);
+    var keyName = sheet.getRange('A1').getValue();
+    var keyValue = sheet.getRange('B1').getValue();
+  }
+  catch(err){
+    Logger.log(err)
+  }
+  if (keyName != 'SMARTSHEET_ACCESS_TOKEN'){
+    throw new Error("SMARTSHEET_ACCESS_TOKEN  not found in key file");
+  }
+  if (keyValue == ""){
+    throw new Error("SMARTSHEET_ACCESS_TOKEN value is empty");
+  }
+  return keyValue;
+}
+
+
+
+
+
+
+
+
