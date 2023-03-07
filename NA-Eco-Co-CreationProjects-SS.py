@@ -20,7 +20,7 @@ def get_custom_field_value(field, val_type):
     return 
 
 def copyProjectsTempalte(newFolderName):
-    os.environ['SMARTSHEET_ACCESS_TOKEN'] = 'jvmfs8OA00K7iJMD2tapJAl7U4jk6tUHqs3Lh'
+    os.environ['SMARTSHEET_ACCESS_TOKEN'] = 'XXXXXXXXXXXXXXXX'
 
     templateFolderID=6795484187649924 #Co-creation projects folder id
     destinationFolerID=2755191272433540 #Solutions projects folder id
