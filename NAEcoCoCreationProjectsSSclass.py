@@ -22,7 +22,7 @@ class mySMProject:
         return 
 
     def copyProjectsTemplate(self, newFolderName):
-        os.environ['SMARTSHEET_ACCESS_TOKEN'] = 'jvmfs8OA00K7iJMD2tapJAl7U4jk6tUHqs3Lh'
+        os.environ['SMARTSHEET_ACCESS_TOKEN'] = ''
 
         templateFolderID=6795484187649924 #Co-creation projects folder id
         destinationFolerID=2755191272433540 #Solutions projects folder id
