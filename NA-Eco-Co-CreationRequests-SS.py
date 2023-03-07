@@ -15,7 +15,7 @@ import_file = ["./AsanaData/in/NA-Eco-Co-creation.json","./AsanaData/in/NA-Eco-T
 export_file = "./AsanaData/out/NA-Eco-Technical-Solution-Co-Creation-Combined.xlsx"
 
 projectsSheetID=1949511405856644 #Co-creation Projects sheet id
-os.environ['SMARTSHEET_ACCESS_TOKEN'] = 'jvmfs8OA00K7iJMD2tapJAl7U4jk6tUHqs3Lh'
+os.environ['SMARTSHEET_ACCESS_TOKEN'] = 'XXXXXXXXXXXXXXXX'
 
 #Connect to Smartsheet
 smart = smartsheet.Smartsheet()
