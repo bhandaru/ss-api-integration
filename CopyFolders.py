@@ -4,7 +4,7 @@ import logging
 import os
 
 _dir = os.path.dirname(os.path.abspath(__file__))
-os.environ['SMARTSHEET_ACCESS_TOKEN'] = ''
+os.environ['SMARTSHEET_ACCESS_TOKEN'] = 'XXXXXXXXXXXXXXXX'
 
 # The API identifies columns by Id, but it's more convenient to refer to column names. Store a map here
 column_map = {}
