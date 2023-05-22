@@ -10,7 +10,7 @@ var UPDATE_COLUMN_NAME = "Project Plan";//Required. This is the name of the colu
 var NEWPROJECT_TASK_SHEET_NAME= "Task Sheet";//Required. This is the name of the document that should be updated with the project name
 var NEWPROJECT_TASK_SHEET_DESC_COLUMN_NAME = "Description";//Required. This is the name of the column that should be updated on the first row.
 var NEWPROJECT_TASK_SHEET_ID = "";//Leave this value empty. This is determined at runtime.
-var PROCESSED_MESSAGE_LABEL = "Processed";//Required. This is the label to be assigned to the email message once it has been processed.
+var PROCESSED_MESSAGE_LABEL = "Processed";//Leave this value empty. This is determined at runtime.
 
 function processNewCoCreationRequests() {
 
@@ -58,7 +58,7 @@ function processNewCoCreationRequests() {
         //Move the message to "Processed" label and archive.
         Logger.log('Marking the message as Read and moving to ' + PROCESSED_MESSAGE_LABEL);
         id[0].markRead();
-        messages[i].addLabel(GmailApp.getUserLabelByName(PROCESSED_MESSAGE_LABEL)).moveToArchive();
+        messages[i].addLabel(GmailApp.getUserLabelByName("PROCESSED_MESSAGE_LABEL")).moveToArchive();
         Logger.log("Processed Project ID: " + projectId);
       }
     catch(err){
@@ -208,11 +208,3 @@ function getSmartSheetToken_(sheetURL){
   }
   return keyValue;
 }
-
-
-
-
-
-
-
-
