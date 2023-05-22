@@ -1,0 +1,231 @@
+//Set Variables for Smartsheet.
+//Replace the values as applicable to your environment
+var SMARTSHEET_TOKEN_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1wFz8MHoZUbbnnXQFf9_CfCj6X-W6bH6UERXU-44lgwI/edit#gid=0';
+var ACCESS_REQUEST_STATUS_SHEETID = 7447919871348612; //Required. This the sheet id of the main sheet to which new co-creation requests are submitted.
+var ADDED_TO_ADMINS_COL_NAME = "Added To Admin"; //Required. This is the column name to track the status of user add to admins group.
+var ADDED_TO_VIEWERS_COL_NAME = "Added To Viewers"; //Required. This is the column name to track the status of user add to viewers group.
+var ADDED_TO_USERS_COL_NAME = "Added To Users"; //Required. This is the column name to track the status of user add to users group.
+var LOOKUP_COLUMN_NAME="Access Request ID";
+var UPDATE_COLUMN_NAME="";//Leave this empty. It is assigned at run time.
+const EMAIL_DOMAIN_CHECK_REGEX = /@redhat\.com$/i;
+var PROCESSED_MESSAGE_LABEL = "Processed";//This is the label for the processed emails.
+var ERROR_MESSAGE_LABEL = "Errors";//Required. This is the label to be assigned to the email message when their processing encounters errors.
+const GROUPS_PAGE_SIZE=1000;//Required. This limits the number of records to pull when looking up groups. The higher the better chance of finding the group.
+
+function processNewAccessRequests() {
+
+  if(getSmartSheetToken_(SMARTSHEET_TOKEN_SHEET_URL) == ""){
+    Logger.log("SMARTSHEET_TOKEN is invalid");
+    return ;
+  };
+
+  var messages = GmailApp.search("subject:Eco-Co-Creation-Access-Request-Approved:  label:inbox label:unread");
+  Logger.log("Found " + messages.length + " messages...");
+
+  for (var i = messages.length - 1; i >= 0; i--) {
+    try{
+        //Process them in the order received
+        var id = messages[i].getMessages();
+        var subject = id[0].getSubject()
+        Logger.log("Processing message: " + subject);
+        
+        Logger.log("Plain Body: " + id[0].getPlainBody());
+        var jsonPayload = id[0].getPlainBody().split("<json>")[1].split("</json>")[0];
+        Logger.log("jsonPayload: " + jsonPayload);
+        var jsonObject = JSON.parse(jsonPayload);
+
+        var accessRequestId = jsonObject["Access Request ID"];
+        var workspaceName = jsonObject["Workspace"];
+        var requestedFor = jsonObject["Requested For"];
+        var accessLevel = jsonObject["Access Level"];
+        var adminsUserGroup = jsonObject["Admins User Group"];
+        var usersUserGroup = jsonObject["Users User Group"];
+        var viewersUserGroup = jsonObject["Viewers User Group"];
+
+        var userAdded = "";
+        var addToUserGroup = "";
+        switch(accessLevel) 
+        {
+          case "Users(Read-Write)":
+            addToUserGroup = usersUserGroup;
+            UPDATE_COLUMN_NAME=ADDED_TO_USERS_COL_NAME;
+            break;
+          case "Admins(Designer)":
+            addToUserGroup = adminsUserGroup;
+            UPDATE_COLUMN_NAME = ADDED_TO_ADMINS_COL_NAME;
+            break;
+          case "Viewers(Read-Only)":
+            addToUserGroup = viewersUserGroup;
+            UPDATE_COLUMN_NAME = ADDED_TO_VIEWERS_COL_NAME;
+            break;
+          default:
+            throw new Error("Invalid Access Level requested. Access level:"+accessLevel);
+        }
+
+
+        accessRequestId= parseInt(accessRequestId);
+        if (!isNaN(accessRequestId))
+        {
+          Logger.log("Processing Access Request ID: "+ accessRequestId + " for workspace " + workspaceName);
+          userAdded = addUsersToGroup_(requestedFor, addToUserGroup);
+          Logger.log("User(s) " + requestedFor + " added to user group " + addToUserGroup);
+        }
+        else
+        {
+          Logger.log("Access Request ID: " + accessRequestId + " is invalid. Marking the message as Read and moving to " + ERROR_MESSAGE_LABEL);
+          messages[i].addLabel(GmailApp.getUserLabelByName(ERROR_MESSAGE_LABEL)).moveToArchive();
+          Logger.log("Error processing Project ID: " + projectId)
+        }
+
+        if ( userAdded == 0 )
+        {
+          //Update Access Request Status sheet with user add status
+          Logger.log("Updating Access Request Status sheet with user add status. Access Request ID: " + accessRequestId);
+          updateRequestStatusSheetRow_(accessRequestId, accessLevel);
+        }
+
+        //Move the message to "Processed" label and archive.
+        Logger.log('Marking the message as Read and moving to ' + PROCESSED_MESSAGE_LABEL);
+        id[0].markRead();
+        messages[i].addLabel(GmailApp.getUserLabelByName(PROCESSED_MESSAGE_LABEL)).moveToArchive();
+        Logger.log("Access Request ID: " + accessRequestId);
+      }
+    catch(err){
+      Logger.log('Marking the message as Read and moving to ' + ERROR_MESSAGE_LABEL);
+      messages[i].addLabel(GmailApp.getUserLabelByName(ERROR_MESSAGE_LABEL)).moveToArchive();
+      Logger.log("Error processing Access Request ID: " + accessRequestId)
+    }
+  } 
+}
+
+function addUsersToGroup_(userName, userGroupName){
+  try{
+    var userGroupId = getUserGroupID_(userGroupName);
+    Logger.log("GroupID for user group" + userGroupName + " is "+ userGroupId);
+
+    var restMethod = "/groups/" + userGroupId + "/members"
+    var data = [];
+    
+    Logger.log("Adding valid email addresses from (" + userName + ") to user group "+ userGroupName);
+    for (let i = 0; i < userName.split(",").length;i++) 
+    {
+      var emailAddress = userName.split(",")[i].trim();
+      if (EMAIL_DOMAIN_CHECK_REGEX.test(emailAddress)) {
+        data.push({"email": emailAddress});
+      }
+    };
+    Logger.log("Adding valid email addresses from (" + userName + ") to user group '"+ userGroupName + "'");
+    var response = sendToSmartsheet_(restMethod, data, 'POST');
+  }
+  catch(err){
+    Logger.log(err)
+    throw new Error("Error getting user group ID.")
+  }
+  return response.resultCode;
+}
+
+function getUserGroupID_(userGroupName){
+
+  Logger.log("Getting user group id for group " + userGroupName);
+  try{
+      var response = sendToSmartsheet_("/groups?pageSize=1000", null, 'GET');
+      var userGroupID = response.data.find(d=>d.name.toUpperCase() === userGroupName.toUpperCase()).id;
+      if (userGroupID == "") 
+        throw new Error("User group " + userGroupName + " not found");
+  }
+  catch(err)
+  {
+    Logger.log("Error getting user group id for group " + userGroupName);
+    throw new Error(err);
+  }
+  return userGroupID;
+}
+
+
+function updateRequestStatusSheetRow_(accessRequestId,accessLevel){
+
+  Logger.log("Updating main request # " + accessRequestId);
+  try{
+    var response = sendToSmartsheet_("/sheets/"+ ACCESS_REQUEST_STATUS_SHEETID + "?level=2&include=objectValue", null, 'GET');
+    var lookupColumnID = "";
+    var updateColumnID =  "";
+    //UPDATE_COLUMN_NAME=ADDED_TO_USERS_COL_NAME;
+    lookupColumnID = response.columns.find(t=>t.title.toUpperCase() === LOOKUP_COLUMN_NAME.toUpperCase()).id;
+    updateColumnID = response.columns.find(t=>t.title.toUpperCase() === UPDATE_COLUMN_NAME.toUpperCase()).id;
+    
+    //6654986651756420
+    Logger.log("Column ID for " + LOOKUP_COLUMN_NAME + ": " + lookupColumnID);
+    Logger.log("Column ID for " + UPDATE_COLUMN_NAME + ": " + updateColumnID);
+
+    var lookupRowID= response.rows.find(r=>r.cells.find(c=>c.columnId === lookupColumnID).objectValue === accessRequestId).id;
+    Logger.log("Row ID for Access Request ID# " + accessRequestId + ": "+ lookupRowID);
+
+    var updateData = [{
+                      "id": lookupRowID,
+                      "cells": [{
+                                  "columnId": updateColumnID,
+                                  'value'  : true,
+                                  'strict': false
+                                }]
+                      }];
+    response = sendToSmartsheet_("/sheets/"+ ACCESS_REQUEST_STATUS_SHEETID + "/rows", updateData, 'PUT');
+  }
+  catch(err)
+  {
+    Logger.log("Error updating access request row for Access Request ID: " + accessRequestId);
+    throw new Error(err);
+  }
+  return lookupRowID;
+}
+
+function sendToSmartsheet_(restEndpoint, formData, httpMethod){
+  try{
+    var SMARTSHEET_ACCESS_TOKEN = getSmartSheetToken_(SMARTSHEET_TOKEN_SHEET_URL);
+
+    Logger.log("Calling Smartsheet API endpoint: "+ restEndpoint + " using http " + httpMethod + " method");
+    const restURL = "https://api.smartsheet.com/2.0" + restEndpoint;
+    const headers = { 
+        "Authorization" : "Bearer " + SMARTSHEET_ACCESS_TOKEN
+      };
+    
+    var options = { 
+      'method' : httpMethod,
+      'contentType': 'application/json',
+      'headers': headers
+    };
+
+    if (httpMethod.toUpperCase() == 'POST' || httpMethod.toUpperCase() == 'PUT')
+    {
+      options.payload=JSON.stringify(formData);
+    }
+
+    if (formData != null ) Logger.log("Request data: \n"+ JSON.stringify(formData));
+    const response = UrlFetchApp.fetch(restURL, options);
+    Logger.log("Response data: \n"+ response);
+    var data = JSON.parse(response);
+  }
+  catch(err)
+  {
+    Logger.log(err)
+  }
+  //Return
+  return data
+}
+
+function getSmartSheetToken_(sheetURL){
+  try{
+    var sheet = SpreadsheetApp.openByUrl(sheetURL);
+    var keyName = sheet.getRange('A1').getValue();
+    var keyValue = sheet.getRange('B1').getValue();
+  }
+  catch(err){
+    Logger.log(err)
+  }
+  if (keyName != 'SMARTSHEET_ACCESS_TOKEN'){
+    throw new Error("SMARTSHEET_ACCESS_TOKEN  not found in key file");
+  }
+  if (keyValue == ""){
+    throw new Error("SMARTSHEET_ACCESS_TOKEN value is empty");
+  }
+  return keyValue;
+}
