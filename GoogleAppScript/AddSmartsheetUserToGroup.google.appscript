@@ -88,7 +88,7 @@ function processNewAccessRequests() {
         Logger.log('Marking the message as Read and moving to ' + PROCESSED_MESSAGE_LABEL);
         id[0].markRead();
         messages[i].addLabel(GmailApp.getUserLabelByName(PROCESSED_MESSAGE_LABEL)).moveToArchive();
-        Logger.log("Access Request ID: " + accessRequestId);
+        Logger.log("Completed Processing Access Request ID: " + accessRequestId);
       }
     catch(err){
       Logger.log('Marking the message as Read and moving to ' + ERROR_MESSAGE_LABEL);
