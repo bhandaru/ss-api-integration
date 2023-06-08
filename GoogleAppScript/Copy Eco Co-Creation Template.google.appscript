@@ -33,7 +33,7 @@ function processNewCoCreationRequests() {
         var jsonObject = JSON.parse(jsonPayload);
 
         var projectId = jsonObject["Project ID"];
-        var projectName = jsonObject["Project Name"];
+        var projectName = jsonObject["Project Name"].substring(0,50);
         var projectDashboardURL = "";
         projectId= parseInt(projectId);
         if (!isNaN(projectId))
