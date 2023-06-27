@@ -1,25 +1,34 @@
 //Set Variables for Smartsheet.
 //Replace the values as applicable to your environment
-var SMARTSHEET_TOKEN_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1wFz8MHoZUbbnnXQFf9_CfCj6X-W6bH6UERXU-44lgwI/edit?usp=share_link';
-var MAIN_PROJECTS_SHEETID = 266473710086020; //Required. This the sheet id of the main sheet to which new co-creation requests are submitted.
-var TEMPLATE_FOLDER_ID = 673240235435908; //Required. This is the folder id of Co-creation projects template folder.
-var DESTINATION_FOLDER_ID = 1022506975946628; //Required. This is the folder id of the destination solutions projects where the template folder should be copied to.
+var SMARTSHEET_TOKEN_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1I3PgnnYy08iQ-fogGCxkjk6Mwo5YaNaOnfdaB8EMJTg/edit#gid=0';
+var MAIN_PROJECTS_SHEETID = 1949511405856644; //Required. This the sheet id of the main sheet to which new co-creation requests are submitted.
+var TEMPLATE_FOLDER_ID = 6795484187649924; //Required. This is the folder id of Co-creation projects template folder.
+var DESTINATION_FOLDER_ID = 2755191272433540; //Required. This is the folder id of the destination solutions projects where the template folder should be copied to.
 var DESTINATION_DOCUMENT_NAME = "Project Dashboard";//Required. This is the name of the dashboard whose URL to be updated in the main projects task sheet.
 var LOOKUP_COLUMN_NAME = "Project ID";//Required. This is the column name of the auto-generated number column in the main proejects sheet. This is used to lookup the row id of the row that should be updated.
 var UPDATE_COLUMN_NAME = "Project Plan";//Required. This is the name of the column that should be updated with the URL to the DESTINATION_DOCUMENT_NAME
+var PCTCOMPLETE_COLUMN_NAME = "% Complete";//Required. This is the % complete column name from the projects all sheet.
 var NEWPROJECT_TASK_SHEET_NAME= "Task Sheet";//Required. This is the name of the document that should be updated with the project name
 var NEWPROJECT_TASK_SHEET_DESC_COLUMN_NAME = "Description";//Required. This is the name of the column that should be updated on the first row.
+var NEWPROJECT_TASK_SHEET_PCTCOMPLETE_COLUMN_NAME = "% Complete";//Required. This is the % complete column name from the template task sheet.
 var NEWPROJECT_TASK_SHEET_ID = "";//Leave this value empty. This is determined at runtime.
-var PROCESSED_MESSAGE_LABEL = "Processed";//Leave this value empty. This is determined at runtime.
+var PROCESSED_MESSAGE_LABEL = "Processed";//Required. This is the label to be assigned to the email message once it has been processed.
+var ERROR_MESSAGE_LABEL = "Errors";//Required. This is the label to be assigned to the email message when their processing encounters errors.
+var PROJECT_FOLDER_COLNAME = "Solution Artifacts Folder";
+
+const destFolderName = "https://drive.google.com/drive/folders/1zsBfl4d5OWttDVHfniWrzZMBTTVcQKrO";
+const destFolder = DriveApp.getFolderById(destFolderName.replace(/^.+\//, ''));
 
 function processNewCoCreationRequests() {
+
+  Logger.log("Starting to process messages");
 
   if(getSmartSheetToken_(SMARTSHEET_TOKEN_SHEET_URL) == ""){
     Logger.log("SMARTSHEET_TOKEN is invalid");
     return ;
   };
 
-  var messages = GmailApp.search("subject:new-eco-co-creation-submitted label:inbox label:unread");
+  var messages = GmailApp.search("subject:new-eco-co-creation-approved label:inbox label:unread");
   Logger.log("Found " + messages.length + " messages...");
 
   for (var i = messages.length - 1; i >= 0; i--) {
@@ -45,11 +54,14 @@ function processNewCoCreationRequests() {
         else
         {
           Logger.log("Project ID: " + projectId + " is invalid. Deleting the email message");
+          throw new Error("Project ID: " + projectId + " is invalid.");
         }
+
+        var newFolder = destFolder.createFolder(projectName);
 
         //Update Main sheet with project dashboard url
         Logger.log("updating main sheet with dashboardURL on row with projectId: " + projectId)
-        updateMainSheetRow_(projectId,projectDashboardURL);
+        updateMainSheetRow_(projectId,projectDashboardURL, newFolder.getUrl());
 
         //Update Task Sheet with project name
         Logger.log("Updating Task Sheet's Description column on 1st row with project Name: " + projectName)
@@ -58,13 +70,17 @@ function processNewCoCreationRequests() {
         //Move the message to "Processed" label and archive.
         Logger.log('Marking the message as Read and moving to ' + PROCESSED_MESSAGE_LABEL);
         id[0].markRead();
-        messages[i].addLabel(GmailApp.getUserLabelByName("PROCESSED_MESSAGE_LABEL")).moveToArchive();
+        messages[i].addLabel(GmailApp.getUserLabelByName(PROCESSED_MESSAGE_LABEL)).moveToArchive();
         Logger.log("Processed Project ID: " + projectId);
       }
     catch(err){
+      logger.log(err);
+      Logger.log('Marking the message as Read and moving to ' + ERROR_MESSAGE_LABEL);
+      messages[i].addLabel(GmailApp.getUserLabelByName(ERROR_MESSAGE_LABEL)).moveToArchive();
       Logger.log("Error processing Project ID: " + projectId)
     }
   } 
+  Logger.log("Done processing messages");
 }
 
 function copyCoCreationProjectTemplate_(newFolderName){
@@ -100,19 +116,29 @@ function copyCoCreationProjectTemplate_(newFolderName){
   return dashboardURL;
 }
 
-function updateMainSheetRow_(projectID,projectDashboardURL){
+function updateMainSheetRow_(projectID,projectDashboardURL, projectFolderURL){
 
   Logger.log("Updating main project # " + projectID);
   try{
     var response = sendToSmartsheet_("/sheets/"+ MAIN_PROJECTS_SHEETID + "?level=2&include=objectValue", null, 'GET');
     var lookupColumnID = response.columns.find(t=>t.title.toUpperCase() === LOOKUP_COLUMN_NAME.toUpperCase()).id;
     var updateColumnID = response.columns.find(t=>t.title.toUpperCase() === UPDATE_COLUMN_NAME.toUpperCase()).id;
+    var pctCompleteColumnID = response.columns.find(t=>t.title.toUpperCase() === PCTCOMPLETE_COLUMN_NAME.toUpperCase()).id;
+    var projectFolderColumdID = response.columns.find(t=>t.title.toUpperCase() === PROJECT_FOLDER_COLNAME.toUpperCase()).id;
+
     //6654986651756420
     Logger.log("Column ID for " + LOOKUP_COLUMN_NAME + ": " + lookupColumnID);
     Logger.log("Column ID for " + UPDATE_COLUMN_NAME + ": " + updateColumnID);
+    Logger.log("Column ID for " + PCTCOMPLETE_COLUMN_NAME + ": " + pctCompleteColumnID);
+    Logger.log("Column ID for " + PROJECT_FOLDER_COLNAME + ": " + projectFolderColumdID);
 
     var lookupRowID= response.rows.find(r=>r.cells.find(c=>c.columnId === lookupColumnID).objectValue === projectID).id;
     Logger.log("Row ID for Project ID# " + projectID + ": "+ lookupRowID);
+
+    //Get new project Task Sheet % Complete RowID and Column ID
+    var response = sendToSmartsheet_("/sheets/"+ NEWPROJECT_TASK_SHEET_ID + "?level=2&include=objectValue", null, 'GET');
+    var newSheetPctCompleteColumnID = response.columns.find(t=>t.title.toUpperCase() === NEWPROJECT_TASK_SHEET_PCTCOMPLETE_COLUMN_NAME.toUpperCase()).id;
+    var newSheetPctCompleteRowID = response.rows[0].id;
 
     var updateData = [{
                       "id": lookupRowID,
@@ -121,9 +147,27 @@ function updateMainSheetRow_(projectID,projectDashboardURL){
                                   'value'  : 'Project Dashboard',
                                   'hyperlink' : { "url": projectDashboardURL},
                                   'strict': false
+                                },
+                                {
+                                  "columnId": projectFolderColumdID,
+                                  "value": projectFolderURL,
+                                  'strict' : false
                                 }]
                       }];
     response = sendToSmartsheet_("/sheets/"+ MAIN_PROJECTS_SHEETID + "/rows", updateData, 'PUT');
+
+    Logger.log("Updating Cell Links");
+    updateData = [{
+                      "id": lookupRowID,
+                      "cells": [
+                                {
+                                  "columnId": pctCompleteColumnID,
+                                  "value": null,
+                                  'linkInFromCell' : { "columnId": newSheetPctCompleteColumnID, "rowId": newSheetPctCompleteRowID, "sheetId": NEWPROJECT_TASK_SHEET_ID}
+                                }]
+                      }];
+    response = sendToSmartsheet_("/sheets/"+ MAIN_PROJECTS_SHEETID + "/rows", updateData, 'PUT');
+
   }
   catch(err)
   {
