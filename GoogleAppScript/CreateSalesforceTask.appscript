@@ -1,0 +1,276 @@
+//Set Variables for Smartsheet.
+//Replace the values as applicable to your environment
+const SMARTSHEET_TOKEN_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1wFz8MHoZUbbnnXQFf9_CfCj6X-W6bH6UERXU-44lgwI/edit#gid=0';
+const REQUEST_SALESFORCE_SHEETID = 4914158944341892; //Required. This the sheet id of the main sheet to which new co-creation requests are submitted.
+const MAIN_REQUEST_SHEETID = 2117343350050692; //Required. This the sheet id of the main sheet to which new co-creation requests are submitted.
+//const FILTERID=5230890854600580;//Required. This is the filterId of a filter that shows only rows pending to be sent to salesforce. It is performant to use this filter.
+const LOOKUP_COLUMN_NAME="Request ID";
+const UPDATE_COLUMN_NAME="Added To SFDC";//Required field. First column name to update.
+const UPDATE_COLUMN_NAME1="SFDC Task ID";//Required field. Second column name to update.
+const SFDX_SERVICE_URL="https://python-sf-api-gsisa.apps.xxx.xxxxxxx.xxxxxx";//Required.
+var SFDX_BEARER_TOKEN="";//Required. Set at runtime.
+//const SFDC_TASK_OWNER_ID="005f2000009JnFs";//Required. 
+//const DEFAULT_PRIORITY_VALUE="Normal";//Required.
+
+
+function processSalesforceTaskRequests() {
+
+  if(getSmartSheetToken_(SMARTSHEET_TOKEN_SHEET_URL) == ""){
+    Logger.log("SMARTSHEET_TOKEN is invalid");
+    return ;
+  };
+
+  var response = sendToSmartsheet_("/sheets/"+ REQUEST_SALESFORCE_SHEETID + "?level=2&include=objectValue", null, 'GET');
+  Logger.log("Found " + response.rows.length + " rows...");
+  var rows = response.rows;
+
+  for (var i = rows.length - 1; i >= 0; i--) {
+    try{
+        //Process them in the order received
+        var requestId = getCellValue_(response, rows[i].id,"Request ID");
+        Logger.log("Processing Request ID: " + requestId);
+
+        var ownerId = getCellValue_(response, rows[i].id,"SFDC Task Owner ID");
+        Logger.log("ownerId: " + ownerId);
+
+        var subject = "SA Activity"; //getCellValue_(response, rows[i].id,"Request Subject");
+        Logger.log("subject: " + subject);
+
+        var activityDate = getCellValue_(response, rows[i].id,"Completed Date");
+        Logger.log("activityDate: " + activityDate);
+
+        var status = getCellValue_(response, rows[i].id,"Status");
+        Logger.log("status: " + status);
+
+        var taskType = getCellValue_(response, rows[i].id,"SFDC Task Type");
+        Logger.log("taskType: " + taskType);
+
+        var priority = getCellValue_(response, rows[i].id,"Priority");
+        Logger.log("priority: " + priority);
+
+        var productLine = getCellValue_(response, rows[i].id,"Product Line");
+        Logger.log("productLine: " + productLine);
+
+        var productGroup = getCellValue_(response, rows[i].id,"Product Group");
+        Logger.log("productGroup: " + productGroup);
+
+        var hoursSpent = getCellValue_(response, rows[i].id,"Hours Spent");
+        Logger.log("hoursSpent: " + hoursSpent);
+        if(!isNaN(parseInt(hoursSpent))){
+          hoursSpent = parseInt(hoursSpent)+"";
+        }else{hoursSpent="";}
+        
+
+        var contactId = getCellValue_(response, rows[i].id,"SFDC WhoId");
+        Logger.log("contactId: " + contactId);
+
+        var accountId = getCellValue_(response, rows[i].id,"SFDC WhatId");
+        Logger.log("accountId: " + accountId);
+
+        var description = getCellValue_(response, rows[i].id,"Closing Summary");
+        Logger.log("description: " + description);
+        
+        if (requestId != null && requestId != "")
+        {
+          Logger.log("Adding Task in Salesforce for Request ID: "+ requestId);
+          
+          var salesForceResponse = addTaskInSalesforce_(ownerId, subject, activityDate, status, taskType, priority, productLine, productGroup, hoursSpent, contactId, accountId, description);
+
+          if ( salesForceResponse.result.toUpperCase() == "SUCCESS" )
+          {
+            Logger.log("Task created in Salesforce for Request ID:  " + requestId + ". Salesforce Task URL: " + salesForceResponse.taskURL);
+            //Update Partner Request Salesforce sheet with user add status
+            Logger.log("Updating Request Status sheet with task created status. Request ID: " + requestId);
+            updateRequestStatusSheetRow_(REQUEST_SALESFORCE_SHEETID, requestId, salesForceResponse.taskURL);
+            
+            //Update Partner Request sheet with user add status
+            Logger.log("Updating Main Request Status sheet with task created status. Request ID: " + requestId);
+            updateRequestStatusSheetRow_(MAIN_REQUEST_SHEETID, requestId, salesForceResponse.taskURL);
+          }
+        }
+        else
+        {
+          Logger.log("Request ID: " + requestId + " is invalid. Moving on to the next request.");
+        }
+
+       
+      }
+    catch(err){
+      Logger.log(err);
+      Logger.log('Error Processing Request ID: ' + requestId);
+    }
+  } 
+}
+
+function addTaskInSalesforce_(ownerId, subject, activityDate, status, taskType, priority, productLine, productGroup, hoursSpent, contactId, accountId, description){
+  try{
+    Logger.log("Calling Salesforce SFDX CLI Service");
+    var restURL = SFDX_SERVICE_URL + "/sfdw/createTask";
+    var httpMethod = "POST";
+    var data = [];
+    
+    const headers = { 
+        "Authorization" : "Bearer " + SFDX_BEARER_TOKEN
+      };
+    
+    var options = { 
+      'method' : httpMethod,
+      'contentType': 'application/json',
+      'headers': headers
+    };
+
+    var formData = {
+                    "ownerId": ownerId,
+                    "subject":subject,
+                    "activityDate":activityDate,
+                    "status":status,
+                    "type":taskType,
+                    "priority": priority,
+                    "productLine": productLine,
+                    "productGroup": productGroup,
+                    "hoursSpent": hoursSpent,
+                    "contactId": contactId,
+                    "accountId": accountId,
+                    "description": description
+                  };
+
+    if (httpMethod.toUpperCase() == 'POST' || httpMethod.toUpperCase() == 'PUT')
+    {
+      options.payload=JSON.stringify(formData);
+    }
+
+    if (formData != null ) Logger.log("Salesforce Task data: \n"+ JSON.stringify(formData));
+    const response = JSON.parse(UrlFetchApp.fetch(restURL, options));
+    Logger.log("Response data: \n"+ JSON.stringify(response));
+    Logger.log("SFDX CLI Service call successful");
+    return response;
+  }
+  catch(err){
+    Logger.log(err)
+    throw new Error("Error invoking SFDX CLI Service.")
+  }
+}
+
+function updateRequestStatusSheetRow_(sheetID, requestId, taskId){
+
+  Logger.log("Updating row with Request ID: " + requestId );
+  try{
+    var response = sendToSmartsheet_("/sheets/"+ sheetID + "?level=2&include=objectValue", null, 'GET');
+    var lookupColumnID = "";
+    var updateColumnID =  "";
+    var updateColumnID1 =  "";
+    //UPDATE_COLUMN_NAME=ADDED_TO_USERS_COL_NAME;
+    lookupColumnID = response.columns.find(t=>t.title.toUpperCase() === LOOKUP_COLUMN_NAME.toUpperCase()).id;
+    updateColumnID = response.columns.find(t=>t.title.toUpperCase() === UPDATE_COLUMN_NAME.toUpperCase()).id;
+    updateColumnID1 = response.columns.find(t=>t.title.toUpperCase() === UPDATE_COLUMN_NAME1.toUpperCase()).id;
+    
+    //6654986651756420
+    Logger.log("Column ID for " + LOOKUP_COLUMN_NAME + ": " + lookupColumnID);
+    Logger.log("Column ID for " + UPDATE_COLUMN_NAME + ": " + updateColumnID);
+    Logger.log("Column ID for " + UPDATE_COLUMN_NAME1 + ": " + updateColumnID1);
+
+    var lookupRowID= response.rows.find(r=>r.cells.find(c=>c.columnId === lookupColumnID).value === requestId).id;
+    
+    var updateData = [{
+                      "id": lookupRowID,
+                      "cells": [{
+                                  "columnId": updateColumnID,
+                                  'value'  : true,
+                                  'strict': false
+                                },
+                                {
+                                  "columnId": updateColumnID1,
+                                  'value'  : taskId,
+                                  'strict': false
+                                },
+                                ]
+                      }];
+    response = sendToSmartsheet_("/sheets/"+ sheetID + "/rows", updateData, 'PUT');
+  }
+  catch(err)
+  {
+    Logger.log("Error updating request row for Request ID: " + requestId);
+    throw new Error(err);
+  }
+  return lookupRowID;
+}
+
+function getCellValue_(sheetData, rowID, columnName){
+  Logger.log("Getting " + columnName + " value for rowID: " +  rowID );
+  var cellValue = "";
+  var columnID =  "";
+  try{
+      columnID = sheetData.columns.find(t=>t.title.toUpperCase() === columnName.toUpperCase()).id;
+      if (sheetData.rows.find(r=>r.id === rowID).cells.find(c=>c.columnId === columnID).value != null)
+      {
+        cellValue = sheetData.rows.find(r=>r.id === rowID).cells.find(c=>c.columnId === columnID).value;
+      }
+      Logger.log("Value of " + columnName + " at rowId: " + rowID + " = " +  cellValue );
+  }
+  catch(err)
+  {
+    Logger.log("Error getting cell value for rowID: " + rowID);
+    throw new Error(err);
+  }
+  return cellValue;
+}
+
+function sendToSmartsheet_(restEndpoint, formData, httpMethod){
+  try{
+    var SMARTSHEET_ACCESS_TOKEN = getSmartSheetToken_(SMARTSHEET_TOKEN_SHEET_URL);
+
+    Logger.log("Calling Smartsheet API endpoint: "+ restEndpoint + " using http " + httpMethod + " method");
+    const restURL = "https://api.smartsheet.com/2.0" + restEndpoint;
+    const headers = { 
+        "Authorization" : "Bearer " + SMARTSHEET_ACCESS_TOKEN
+      };
+    
+    var options = { 
+      'method' : httpMethod,
+      'contentType': 'application/json',
+      'headers': headers
+    };
+
+    if (httpMethod.toUpperCase() == 'POST' || httpMethod.toUpperCase() == 'PUT')
+    {
+      options.payload=JSON.stringify(formData);
+    }
+
+    if (formData != null ) Logger.log("Request data: \n"+ JSON.stringify(formData));
+    const response = UrlFetchApp.fetch(restURL, options);
+    Logger.log("Response data: \n"+ response);
+    var data = JSON.parse(response);
+  }
+  catch(err)
+  {
+    Logger.log(err)
+  }
+  //Return
+  return data
+}
+
+function getSmartSheetToken_(sheetURL){
+  try{
+    var sheet = SpreadsheetApp.openByUrl(sheetURL);
+    var keyName = sheet.getRange('A1').getValue();
+    var keyValue = sheet.getRange('B1').getValue();
+    SFDX_BEARER_TOKEN="";
+    if(sheet.getRange('A2').getValue() == "SFDX_BEARER_TOKEN")
+    {
+      SFDX_BEARER_TOKEN = sheet.getRange('B2').getValue();
+    }
+  }
+  catch(err){
+    Logger.log(err)
+  }
+  if (keyName != 'SMARTSHEET_ACCESS_TOKEN'){
+    throw new Error("SMARTSHEET_ACCESS_TOKEN  not found in key file");
+  }
+  if (keyValue == ""){
+    throw new Error("SMARTSHEET_ACCESS_TOKEN value is empty");
+  }
+  if (SFDX_BEARER_TOKEN == ""){
+    throw new Error("SFDX_BEARER_TOKEN value is empty");
+  }
+  return keyValue;
+}
