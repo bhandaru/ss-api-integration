@@ -15,6 +15,8 @@ var NEWPROJECT_TASK_SHEET_ID = "";//Leave this value empty. This is determined a
 var PROCESSED_MESSAGE_LABEL = "Processed";//Required. This is the label to be assigned to the email message once it has been processed.
 var ERROR_MESSAGE_LABEL = "Errors";//Required. This is the label to be assigned to the email message when their processing encounters errors.
 var PROJECT_FOLDER_COLNAME = "Solution Artifacts Folder";
+var NEW_APPROVED_PROJECTS_SHEETID = 467885218549636; //Sheet ID of the file that has the newly submitted and approved projects.
+
 
 const destFolderName = "https://drive.google.com/drive/folders/1zsBfl4d5OWttDVHfniWrzZMBTTVcQKrO";
 const destFolder = DriveApp.getFolderById(destFolderName.replace(/^.+\//, ''));
@@ -28,27 +30,27 @@ function processNewCoCreationRequests() {
     return ;
   };
 
-  var messages = GmailApp.search("subject:new-eco-co-creation-approved label:inbox label:unread");
-  Logger.log("Found " + messages.length + " messages...");
+  var newProjectsResponse = sendToSmartsheet_("/sheets/"+ NEW_APPROVED_PROJECTS_SHEETID + "?level=2&include=objectValue", null, 'GET');
+  Logger.log("Found " + newProjectsResponse.rows.length + " rows...");
 
-  for (var i = messages.length - 1; i >= 0; i--) {
+  var newProjectRows = newProjectsResponse.rows;
+  for (var i = 0; i < newProjectRows.length; i++) {
     try{
         //Process them in the order received
-        var id = messages[i].getMessages();
-        var subject = id[0].getSubject()
-        Logger.log("Processing message: " + subject);
-        
-        var jsonPayload = id[0].getPlainBody().split("<json>")[1].split("</json>")[0];
-        var jsonObject = JSON.parse(jsonPayload);
+        var id = newProjectRows[i].id;
+        //var subject = id[0].getSubject()
+        Logger.log("Processing Row ID: " + id);
 
-        var projectId = jsonObject["Project ID"];
-        var projectName = jsonObject["Project Name"].substring(0,50);
+        var projectId = getCellValue_(newProjectsResponse, newProjectRows[i].id,"Project ID"); //jsonObject["Project ID"];
+        Logger.log("Processing Project ID: " + projectId);
+
+        var projectName = getCellValue_(newProjectsResponse, newProjectRows[i].id,"Co-Creation Project Name"); //jsonObject["Project Name"];
         var projectDashboardURL = "";
         projectId= parseInt(projectId);
         if (!isNaN(projectId))
         {
           Logger.log("Copying the Co-Creation template in Smartsheet... for Proeject ID: "+ projectId)
-          projectDashboardURL = copyCoCreationProjectTemplate_(projectName);
+          projectDashboardURL = copyCoCreationProjectTemplate_(projectName.substring(0,50));
           Logger.log("Project Dashboard URL: " + projectDashboardURL);
         }
         else
@@ -67,19 +69,16 @@ function processNewCoCreationRequests() {
         Logger.log("Updating Task Sheet's Description column on 1st row with project Name: " + projectName)
         updateTaskSheetRow_(NEWPROJECT_TASK_SHEET_ID, projectName);
 
-        //Move the message to "Processed" label and archive.
-        Logger.log('Marking the message as Read and moving to ' + PROCESSED_MESSAGE_LABEL);
-        id[0].markRead();
-        messages[i].addLabel(GmailApp.getUserLabelByName(PROCESSED_MESSAGE_LABEL)).moveToArchive();
+        //Delete row from the newly submitted and approved projects.
+        deleteRowFromSheet_(NEW_APPROVED_PROJECTS_SHEETID, id)
+
         Logger.log("Processed Project ID: " + projectId);
       }
     catch(err){
-      logger.log(err);
-      Logger.log('Marking the message as Read and moving to ' + ERROR_MESSAGE_LABEL);
-      messages[i].addLabel(GmailApp.getUserLabelByName(ERROR_MESSAGE_LABEL)).moveToArchive();
+      Logger.log(err);
       Logger.log("Error processing Project ID: " + projectId)
     }
-  } 
+  }
   Logger.log("Done processing messages");
 }
 
@@ -175,6 +174,37 @@ function updateMainSheetRow_(projectID,projectDashboardURL, projectFolderURL){
     throw new Error(err);
   }
   return lookupRowID;
+}
+
+function getCellValue_(sheetData, rowID, columnName){
+  Logger.log("Getting " + columnName + " value for rowID: " +  rowID );
+  var cellValue = "";
+  var columnID =  "";
+  try{
+      columnID = sheetData.columns.find(t=>t.title.toUpperCase() === columnName.toUpperCase()).id;
+      if (sheetData.rows.find(r=>r.id === rowID).cells.find(c=>c.columnId === columnID).value != null)
+      {
+        cellValue = sheetData.rows.find(r=>r.id === rowID).cells.find(c=>c.columnId === columnID).value;
+      }
+      Logger.log("Value of " + columnName + " at rowId: " + rowID + " = " +  cellValue );
+  }
+  catch(err)
+  {
+    Logger.log("Error getting cell value for rowID: " + rowID);
+    throw new Error(err);
+  }
+  return cellValue;
+}
+
+function deleteRowFromSheet_(sheetID, rowID){
+  try{
+    var response = sendToSmartsheet_("/sheets/"+ sheetID +"/rows?ids="+ rowID + "&ignoreRowsNotFound=true", null, 'DELETE');
+  }
+  catch(err){
+    Logger.log(err)
+    throw new Error("Errror deleting row: " + rowID + " from sheetID: " + sheetID);
+  }
+  return;
 }
 
 function updateTaskSheetRow_(taskSheetId, projectName){
