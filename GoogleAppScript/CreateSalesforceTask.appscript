@@ -310,10 +310,3 @@ function getSmartSheetToken_(sheetURL){
   }
   return keyValue;
 }
-
-
-
-
-
-
-
