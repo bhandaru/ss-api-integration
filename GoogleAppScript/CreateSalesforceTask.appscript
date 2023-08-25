@@ -7,7 +7,8 @@ const MAIN_REQUEST_SHEETID = 2117343350050692; //Required. This the sheet id of 
 const LOOKUP_COLUMN_NAME="Request ID";
 const UPDATE_COLUMN_NAME="Added To SFDC";//Required field. First column name to update.
 const UPDATE_COLUMN_NAME1="SFDC Task ID";//Required field. Second column name to update.
-const SFDX_SERVICE_URL="https://python-sf-api-gsisa.apps.xxx.xxxxxxx.xxxxxx";//Required.
+const SFDX_SERVICE_URL="https://python-sf-api-gsisa.apps.hou.edgelab.online";//Required.
+//const SFDX_SERVICE_URL="https://python-sf-api-shankar-dev.apps.cluster-9fvn5.9fvn5.sandbox2582.opentlc.com";//Required.
 var SFDX_BEARER_TOKEN="";//Required. Set at runtime.
 //const SFDC_TASK_OWNER_ID="005f2000009JnFs";//Required. 
 //const DEFAULT_PRIORITY_VALUE="Normal";//Required.
@@ -33,8 +34,23 @@ function processSalesforceTaskRequests() {
         var ownerId = getCellValue_(response, rows[i].id,"SFDC Task Owner ID");
         Logger.log("ownerId: " + ownerId);
 
-        var subject = "SA Activity"; //getCellValue_(response, rows[i].id,"Request Subject");
-        Logger.log("subject: " + subject);
+        var requestSubject = "SA Activity"; //getCellValue_(response, rows[i].id,"Request Subject");
+        Logger.log("requestSubject: " + requestSubject);
+
+        var requestDescription = getCellValue_(response, rows[i].id,"Description");
+        Logger.log("requestDescription: " + requestDescription);
+
+        var requestorName = getCellValue_(response, rows[i].id,"Requestor Name");
+        Logger.log("requestorName: " + requestorName);
+
+        var requestorEmail = getCellValue_(response, rows[i].id,"Requestor Email Address");
+        Logger.log("requestorEmail: " + requestorEmail);
+
+        var sfdcOpptyID = getCellValue_(response, rows[i].id,"SFDC Opportunity ID");
+        Logger.log("sfdcOpptyID: " + sfdcOpptyID);
+
+        var activeOpportunity = getCellValue_(response, rows[i].id,"Active Opportunity");
+        Logger.log("activeOpportunity: " + activeOpportunity);
 
         var activityDate = getCellValue_(response, rows[i].id,"Completed Date");
         Logger.log("activityDate: " + activityDate);
@@ -60,21 +76,41 @@ function processSalesforceTaskRequests() {
           hoursSpent = parseInt(hoursSpent)+"";
         }else{hoursSpent="";}
         
-
         var contactId = getCellValue_(response, rows[i].id,"SFDC WhoId");
         Logger.log("contactId: " + contactId);
 
         var accountId = getCellValue_(response, rows[i].id,"SFDC WhatId");
         Logger.log("accountId: " + accountId);
 
+        var customerName = getCellValue_(response, rows[i].id,"Customer Name");
+        Logger.log("customerName: " + customerName);
+
+        var customerGeo = getCellValue_(response, rows[i].id,"Customer Geo");
+        Logger.log("customerGeo: " + customerGeo);
+
+        var engagementType = getCellValue_(response, rows[i].id,"Engagement Type");
+        Logger.log("engagementType: " + engagementType);
+
         var description = getCellValue_(response, rows[i].id,"Closing Summary");
         Logger.log("description: " + description);
+
+        //Concatenate request data to description field
+        description = "Customer Name: " + customerName + "\n" + 
+                      "Customer Geo: " + customerGeo + "\n" + 
+                      "Engagement Type: " + engagementType + "\n" + 
+                      "Active Opportunity: " + activeOpportunity + "\n" +
+                      "SFDC Opportunity ID: " + sfdcOpptyID + "\n" +
+                      "Request Subject: " + requestSubject + "\n" + 
+                      "Request Description: " + requestDescription + "\n" + 
+                      "\n" + 
+                      "Activity Summary: " + description;
+
         
         if (requestId != null && requestId != "")
         {
           Logger.log("Adding Task in Salesforce for Request ID: "+ requestId);
           
-          var salesForceResponse = addTaskInSalesforce_(ownerId, subject, activityDate, status, taskType, priority, productLine, productGroup, hoursSpent, contactId, accountId, description);
+          var salesForceResponse = addTaskInSalesforce_(ownerId, requestSubject, activityDate, status, taskType, priority, productLine, productGroup, hoursSpent, contactId, accountId, description);
 
           if ( salesForceResponse.result.toUpperCase() == "SUCCESS" )
           {
@@ -274,3 +310,10 @@ function getSmartSheetToken_(sheetURL){
   }
   return keyValue;
 }
+
+
+
+
+
+
+
